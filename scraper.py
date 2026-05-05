@@ -1,14 +1,13 @@
 """
-Drogerie Akční Ceny Scraper — Rossmann + Claude API + Web Search
-================================================================
-Rossmann: statický scraping
-DM, Lidl, Albert, Kaufland, BILLA, Penny, Tesco: Claude API + web search
+Drogerie Akční Ceny Scraper — kupiapi + Rossmann scraping
+==========================================================
+kupiapi: scrape všech obchodů z kupi.cz (Lidl, Albert, Teta, DM, atd.)
+Rossmann: přímý scraping webu
 Nasazení: Render.com (free tier)
 Spouštění: Automaticky 2× týdně (Po + Čt)
 """
 
 import os
-import json
 import re
 import time
 import logging
@@ -20,40 +19,22 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from bs4 import BeautifulSoup
 from supabase import create_client
 
-# ============================================================
-# KONFIGURACE
-# ============================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://eifooaghbprllczieowj.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY", "")
 
-HEADERS_ANTHROPIC = {
-    "Content-Type": "application/json",
-    "x-api-key": ANTHROPIC_KEY,
-    "anthropic-version": "2023-06-01",
-}
-
-HEADERS_WEB = {
+HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
     "Accept-Language": "cs-CZ,cs;q=0.9",
 }
 
-# Obchody přes Claude API
-STORES = [
-    {
-        "name": "Lidl",
-        "query": "Jdi na https://www.lidl.cz/aktualni-letak a najdi POUZE drogerii se slevou z aktuálního letáku. Hledej: prací prostředky, čisticí prostředky, kosmetiku, sprchové gely, šampóny, zubní pasty, toaletní papír, plenky, deodoranty. NEZAHRNUJ potraviny, nápoje, oblečení, elektro. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
-        "name": "Teta",
-        "query": "Jdi na https://www.tetadrogerie.cz/akce a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, péči o tělo, vlasovou kosmetiku, zubní péči, hygienické potřeby. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
+# Kategórie drogerie na kupi.cz
+KUPI_CATEGORIES = [
+    "drogerie",
+    "krasa",
 ]
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -62,11 +43,9 @@ log = logging.getLogger(__name__)
 
 def save_deals(deals: list, store: str, category: str = "drogerie") -> int:
     if not deals:
-        log.warning(f"{store}: žádné akce k uložení")
         return 0
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     supabase.table("deals").delete().eq("store", store).execute()
-    log.info(f"Smazány staré záznamy {store}")
     now = datetime.now(timezone.utc).isoformat()
     records = []
     for d in deals:
@@ -76,9 +55,9 @@ def save_deals(deals: list, store: str, category: str = "drogerie") -> int:
             "name": str(d.get("name", ""))[:200],
             "store": store,
             "brand": d.get("brand"),
-            "price": float(d["price"]) if d.get("price") else None,
-            "old_price": float(d["old_price"]) if d.get("old_price") else None,
-            "discount": int(d["discount"]) if d.get("discount") else None,
+            "price": d.get("price"),
+            "old_price": d.get("old_price"),
+            "discount": d.get("discount"),
             "valid_from": d.get("valid_from"),
             "valid_to": d.get("valid_to"),
             "source_url": d.get("source_url"),
@@ -89,122 +68,166 @@ def save_deals(deals: list, store: str, category: str = "drogerie") -> int:
         return 0
     total = 0
     for i in range(0, len(records), 50):
-        batch = records[i:i+50]
-        result = supabase.table("deals").insert(batch).execute()
+        result = supabase.table("deals").insert(records[i:i+50]).execute()
         total += len(result.data) if result.data else 0
     log.info(f"Uloženo {total} akcí ({store})")
     return total
 
 
+def save_all(deals: list) -> int:
+    """Uloží všechny deals najednou (smažeme vše kromě Rossmann a vložíme)."""
+    if not deals:
+        return 0
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    # Smaž staré záznamy z kupi (ne Rossmann)
+    supabase.table("deals").delete().neq("store", "Rossmann").execute()
+    log.info("Smazány staré záznamy (ne-Rossmann)")
+    total = 0
+    for i in range(0, len(deals), 50):
+        result = supabase.table("deals").insert(deals[i:i+50]).execute()
+        total += len(result.data) if result.data else 0
+    log.info(f"Uloženo celkem {total} akcí z kupi.cz")
+    return total
+
+
 # ============================================================
-# CLAUDE API
+# KUPI.CZ SCRAPER
 # ============================================================
 
-def ask_claude(store_name: str, query: str, category: str = "drogerie") -> list:
-    system_prompt = """Jsi expert na české akční ceny DROGERIE. Vyhledej aktuální akce a vrať POUZE validní JSON pole, bez jakéhokoli dalšího textu.
+def parse_price(text: str):
+    if not text:
+        return None
+    text = text.replace("\xa0", "").replace(" ", "").replace(",", ".")
+    m = re.search(r"(\d+\.?\d*)", text)
+    return float(m.group(1)) if m else None
 
-HLEDEJ POUZE TYTO KATEGORIE DROGERIE:
-- Prací prostředky (prací prášky, gely, kapsle, aviváže)
-- Čisticí prostředky (na nádobí, podlahy, koupelnu, WC)
-- Přípravky do myčky (tablety, sůl, leštidlo)
-- Kosmetika (make-up, rtěnky, řasenky, oční stíny)
-- Péče o pleť (krémy, séra, masky, micelární vody)
-- Péče o tělo (sprchové gely, tělová mléka, deodoranty, mýdla)
-- Vlasová kosmetika (šampóny, kondicionéry, masky, laky)
-- Péče o zuby (zubní pasty, kartáčky, ústní vody)
-- Hygienické potřeby (toaletní papír, papírové kapesníky, vlhčené ubrousky)
-- Epilace a holení (žiletky, krémy na holení, vosk)
-- Pro miminka (plenky, dětské krémy, šampóny)
-- Zdraví a vitamíny (vitamíny, náplasti, doplňky stravy)
-- Úklidové pomůcky (houby, mopy, rukavice)
-- Vonné produkty (svíčky, osvěžovače vzduchu)
 
-NEZAHRNUJ: potraviny, nápoje, alkohol, oblečení, elektroniku, hračky, nábytek.
+def scrape_kupi_category(category: str) -> list:
+    """Scrapuje kupi.cz kategorii a vrátí seznam akčních produktů."""
+    url = f"https://www.kupi.cz/slevy/{category}"
+    deals = []
+    page = 1
 
-DEFINICE AKCE — produkt musí mít:
-- Přeškrtnutou původní cenu a nižší akční cenu
-- NEBO být v akčním letáku označen jako "Akce", "Sleva", "Super cena"
+    while page <= 5:  # Max 5 stránek
+        page_url = f"{url}?page={page}" if page > 1 else url
+        try:
+            log.info(f"Scraping kupi.cz: {page_url}")
+            r = requests.get(page_url, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
 
-Formát každého produktu:
-{
-  "name": "název produktu včetně gramáže (např. Ariel prací gel 1,8 l)",
-  "brand": "značka (např. Ariel)",
-  "price": 89.90,
-  "old_price": 149.90,
-  "discount": 40,
-  "valid_from": "2026-05-05",
-  "valid_to": "2026-05-11",
-  "source_url": "https://..."
-}
-
-Pravidla:
-- Vrať POUZE JSON pole [...], žádný jiný text ani markdown
-- Ceny jako čísla s desetinnou tečkou
-- discount jako celé číslo (procenta)
-- Datumy YYYY-MM-DD, pokud nejsou známy dej null
-- Uveď 10-25 produktů
-- Pokud nenajdeš žádnou drogerii v akci, vrať []"""
-
-    payload = {
-        "model": "claude-sonnet-4-5",
-        "max_tokens": 4096,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": query}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}]
-    }
-
-    try:
-        log.info(f"Volám Claude API pro {store_name}...")
-        for attempt in range(3):
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=HEADERS_ANTHROPIC,
-                json=payload,
-                timeout=90
+            # Kupi.cz produktové dlaždice
+            products = soup.select(
+                "article.offer, div.offer, "
+                "[class*='offer-item'], [class*='OfferItem'], "
+                "[class*='product-item'], div[data-offer]"
             )
-            if response.status_code == 429:
-                wait = 30 * (attempt + 1)
-                log.warning(f"{store_name}: rate limit, čekám {wait}s (pokus {attempt+1}/3)")
-                time.sleep(wait)
-                continue
-            response.raise_for_status()
+
+            if not products:
+                # Zkus alternativní selektory
+                products = soup.select("li[class*='item'], div[class*='item']")
+
+            if not products:
+                log.info(f"Kupi.cz {category} strana {page}: žádné produkty")
+                break
+
+            log.info(f"Kupi.cz {category} strana {page}: {len(products)} produktů")
+
+            for product in products:
+                try:
+                    # Název
+                    name_el = product.select_one(
+                        "h2, h3, [class*='name'], [class*='title'], [class*='Name']"
+                    )
+                    name = name_el.get_text(strip=True) if name_el else None
+                    if not name or len(name) < 2:
+                        continue
+
+                    # Obchod
+                    store_el = product.select_one(
+                        "[class*='store'], [class*='shop'], [class*='vendor'], "
+                        "[class*='retailer'], img[alt]"
+                    )
+                    store = store_el.get("alt") or store_el.get_text(strip=True) if store_el else "Neuvedeno"
+
+                    # Akční cena
+                    price_el = product.select_one(
+                        "[class*='action'], [class*='sale'], [class*='current'], "
+                        "[class*='price-action'], [class*='akce']"
+                    )
+                    if not price_el:
+                        price_el = product.select_one("[class*='price']")
+                    price = parse_price(price_el.get_text()) if price_el else None
+                    if not price or price <= 0:
+                        continue
+
+                    # Původní cena
+                    old_el = product.select_one(
+                        "s, del, [class*='original'], [class*='before'], [class*='old'], [class*='regular']"
+                    )
+                    old_price = parse_price(old_el.get_text()) if old_el else None
+                    if old_price and old_price <= price:
+                        old_price = None
+
+                    # Sleva %
+                    discount_el = product.select_one("[class*='discount'], [class*='percent'], [class*='saving']")
+                    discount = None
+                    if discount_el:
+                        dm = re.search(r"(\d+)", discount_el.get_text())
+                        discount = int(dm.group(1)) if dm else None
+                    if not discount and old_price:
+                        discount = round(((old_price - price) / old_price) * 100)
+
+                    # Platnost
+                    valid_el = product.select_one("[class*='valid'], [class*='date'], [class*='period']")
+                    valid_to = None
+                    if valid_el:
+                        vm = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", valid_el.get_text())
+                        if vm:
+                            valid_to = f"{vm.group(3)}-{int(vm.group(2)):02d}-{int(vm.group(1)):02d}"
+
+                    # Link
+                    link_el = product.select_one("a[href]")
+                    source_url = "https://www.kupi.cz" + link_el["href"] if link_el and link_el.get("href", "").startswith("/") else (link_el["href"] if link_el else url)
+
+                    deals.append({
+                        "name": name[:200],
+                        "store": store,
+                        "brand": name.split()[0] if name else None,
+                        "price": price,
+                        "old_price": old_price,
+                        "discount": discount,
+                        "valid_from": None,
+                        "valid_to": valid_to,
+                        "source_url": source_url,
+                        "category": "drogerie",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
+
+                except Exception as e:
+                    log.debug(f"Chyba při parsování: {e}")
+                    continue
+
+            # Zkontroluj zda je další strana
+            next_btn = soup.select_one("a[rel='next'], [class*='next'], [aria-label='Next']")
+            if not next_btn:
+                break
+            page += 1
+            time.sleep(1)
+
+        except Exception as e:
+            log.error(f"Kupi.cz chyba {page_url}: {e}")
             break
 
-        data = response.json()
-        text_parts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-        text = "\n".join(text_parts).strip()
-
-        if not text:
-            log.warning(f"{store_name}: prázdná odpověď")
-            return []
-
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start == -1 or end == 0:
-            log.warning(f"{store_name}: JSON pole nenalezeno")
-            return []
-
-        deals = json.loads(text[start:end])
-        if not isinstance(deals, list):
-            return []
-
-        log.info(f"{store_name}: nalezeno {len(deals)} akcí")
-        return deals
-
-    except json.JSONDecodeError as e:
-        log.error(f"{store_name}: chyba JSON: {e}")
-        return []
-    except Exception as e:
-        log.error(f"{store_name}: chyba: {e}")
-        return []
+    return deals
 
 
 # ============================================================
-# ROSSMANN — statický scraping (funguje bez JS)
+# ROSSMANN — přímý scraping
 # ============================================================
 
 def scrape_rossmann() -> list:
-    ROSSMANN_URLS = [
+    URLS = [
         "https://www.rossmann.cz/akce-a-slevy",
         "https://www.rossmann.cz/dekorativni-kosmetika",
         "https://www.rossmann.cz/vlasova-kosmetika",
@@ -226,40 +249,31 @@ def scrape_rossmann() -> list:
     seen = set()
     now = datetime.now(timezone.utc).isoformat()
 
-    for url in ROSSMANN_URLS:
+    for url in URLS:
         try:
-            log.info(f"Scraping Rossmann: {url}")
-            r = requests.get(url, headers=HEADERS_WEB, timeout=30, verify=False)
+            r = requests.get(url, headers=HEADERS, timeout=30, verify=False)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
-            products = soup.select("div.product-tile")
-            if not products:
-                continue
-            for product in products:
+            for product in soup.select("div.product-tile"):
                 try:
-                    name_el = product.select_one("h2, h3, h4, [class*='name'], [class*='title']")
+                    name_el = product.select_one("h2, h3, h4, [class*='name']")
                     name = name_el.get_text(strip=True) if name_el else None
-                    if not name or len(name) < 2:
+                    if not name or name.lower()[:50] in seen:
                         continue
-                    key = name.lower()[:50]
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    price_el = product.select_one("[class*='sale'], [class*='offer'], [class*='price']")
-                    price = parse_price(price_el.get_text(strip=True)) if price_el else None
+                    seen.add(name.lower()[:50])
+                    price_el = product.select_one("[class*='sale'], [class*='price']")
+                    price = parse_price(price_el.get_text()) if price_el else None
                     if not price:
                         continue
-                    old_el = product.select_one("s, del, [class*='original'], [class*='old']")
-                    old_price = parse_price(old_el.get_text(strip=True)) if old_el else None
+                    old_el = product.select_one("s, del, [class*='original']")
+                    old_price = parse_price(old_el.get_text()) if old_el else None
                     if old_price and old_price <= price:
                         old_price = None
                     discount = round(((old_price - price) / old_price) * 100) if old_price else None
-                    brand_el = product.select_one("[class*='brand'], [class*='Brand']")
-                    brand = brand_el.get_text(strip=True) if brand_el else (name.split()[0] if name else None)
                     all_deals.append({
                         "name": name[:200],
                         "store": "Rossmann",
-                        "brand": brand,
+                        "brand": name.split()[0],
                         "price": price,
                         "old_price": old_price,
                         "discount": discount,
@@ -275,7 +289,7 @@ def scrape_rossmann() -> list:
         except Exception as e:
             log.error(f"Rossmann chyba {url}: {e}")
 
-    log.info(f"Rossmann celkem: {len(all_deals)} akcí")
+    log.info(f"Rossmann: {len(all_deals)} akcí")
     return all_deals
 
 
@@ -284,29 +298,27 @@ def scrape_rossmann() -> list:
 # ============================================================
 
 def run():
-    log.info("=== Drogerie scraper START ===")
-    results = {}
+    log.info("=== Scraper START ===")
 
-    # ROSSMANN
-    log.info("--- Rossmann (scraping) ---")
+    # 1. Rossmann
     rossmann_deals = scrape_rossmann()
-    results["Rossmann"] = len(rossmann_deals)
     if rossmann_deals:
         save_deals(rossmann_deals, "Rossmann", "drogerie")
 
-    # Ostatní obchody přes Claude API
-    for store_config in STORES:
-        store = store_config["name"]
-        category = store_config.get("category", "drogerie")
-        log.info(f"--- {store} (Claude API) ---")
-        deals = ask_claude(store, store_config["query"], category)
-        results[store] = len(deals)
-        if deals:
-            save_deals(deals, store, category)
-        time.sleep(60)  # 60s pauza kvůli rate limitu
+    # 2. Kupi.cz — drogerie ze všech obchodů
+    all_kupi = []
+    for cat in KUPI_CATEGORIES:
+        log.info(f"--- Kupi.cz kategorie: {cat} ---")
+        deals = scrape_kupi_category(cat)
+        all_kupi.extend(deals)
+        log.info(f"Kupi.cz {cat}: {len(deals)} akcí")
+        time.sleep(2)
 
-    log.info(f"=== Drogerie scraper END === {results}")
-    log.info(f"Celkem uloženo: {sum(results.values())} akcí ze {len(results)} obchodů")
+    log.info(f"Kupi.cz celkem: {len(all_kupi)} akcí")
+    if all_kupi:
+        save_all(all_kupi)
+
+    log.info(f"=== Scraper END — Rossmann: {len(rossmann_deals)}, Kupi: {len(all_kupi)} ===")
 
 
 if __name__ == "__main__":
