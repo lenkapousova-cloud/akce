@@ -256,6 +256,21 @@ def scrape_rossmann_page(url: str) -> list:
 # ============================================================
 
 def scrape_with_playwright(url: str, wait_selector: str = None, timeout: int = 15000) -> str:
+    # Nastav cestu k prohlížeči pokud existuje
+    import subprocess
+    pw_path = "/opt/render/project/pw-browsers"
+    if os.path.exists(pw_path):
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = pw_path
+    else:
+        # Nainstaluj chromium za běhu pokud neexistuje
+        try:
+            subprocess.run(
+                ["playwright", "install", "chromium", "--with-deps"],
+                check=True, capture_output=True, timeout=120
+            )
+            log.info("Chromium nainstalován za běhu")
+        except Exception as e:
+            log.warning(f"Playwright install failed: {e}")
     """Načte stránku přes headless Chromium a vrátí HTML."""
     try:
         with sync_playwright() as p:
