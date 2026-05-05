@@ -1,16 +1,18 @@
 """
-Rossmann.cz Akční Ceny Scraper
-==============================
-Scrapuje akční nabídky z rossmann.cz a ukládá do Supabase.
+Drogerie Akční Ceny Scraper — Rossmann + DM + Teta
+===================================================
+Scrapuje akční nabídky z rossmann.cz, dm.cz, teta.cz a ukládá do Supabase.
 Nasazení: Render.com (free tier)
 Spouštění: Automaticky 2× týdně (Po + Čt) přes Render Cron Job
+
+Extrahuje: název, obchod, EAN, akční cena, původní cena, sleva %, platnost akce
 """
 
 import os
 import re
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -18,22 +20,10 @@ from bs4 import BeautifulSoup
 from supabase import create_client, Client
 
 # ============================================================
-# KONFIGURACE — nastavte jako Environment Variables na Render
+# KONFIGURACE
 # ============================================================
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://eifooaghbprllczieowj.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")  # service_role key
-
-# URL stránek k scrapování
-ROSSMANN_URLS = [
-    "https://www.rossmann.cz/akce-a-slevy",
-    "https://www.rossmann.cz/dekorativni-kosmetika",
-    "https://www.rossmann.cz/pece-o-plet",
-    "https://www.rossmann.cz/vlasova-kosmetika",
-    "https://www.rossmann.cz/prace-a-uklid",
-    "https://www.rossmann.cz/pece-o-zdravi",
-    "https://www.rossmann.cz/telo-a-koupel",
-    "https://www.rossmann.cz/parfemy",
-]
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -42,6 +32,32 @@ HEADERS = {
     "Accept-Language": "cs-CZ,cs;q=0.9",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
+
+DM_URLS = [
+    "https://www.dm.cz/akce/",
+    "https://www.dm.cz/kosmetika/",
+    "https://www.dm.cz/pece-o-telo/",
+    "https://www.dm.cz/vlasy/",
+    "https://www.dm.cz/prace-a-uklid/",
+    "https://www.dm.cz/zdravi/",
+]
+
+ROSSMANN_URLS = [
+    "https://www.rossmann.cz/akce-a-slevy",
+    "https://www.rossmann.cz/dekorativni-kosmetika",
+    "https://www.rossmann.cz/vlasova-kosmetika",
+    "https://www.rossmann.cz/pece-o-plet-a-telo",
+    "https://www.rossmann.cz/prace-a-uklid-v-domacnosti",
+]
+
+TETA_URLS = [
+    "https://www.teta.cz/akce/",
+    "https://www.teta.cz/kosmetika/",
+    "https://www.teta.cz/pece-o-telo/",
+    "https://www.teta.cz/vlasova-kosmetika/",
+    "https://www.teta.cz/cistici-prostredky/",
+    "https://www.teta.cz/pece-o-zdravi/",
+]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -55,33 +71,35 @@ def get_supabase() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def save_deals(deals: list[dict]) -> int:
-    """Uloží akce do Supabase. Vrátí počet uložených."""
+def save_deals(deals: list, store: str) -> int:
     if not deals:
         return 0
-
     supabase = get_supabase()
-
-    # Vymaž staré záznamy pro Rossmann
-    supabase.table("deals").delete().eq("store", "Rossmann").execute()
-    log.info("Smazány staré záznamy Rossmann")
-
-    # Vlož nové
-    result = supabase.table("deals").insert(deals).execute()
-    count = len(result.data) if result.data else 0
-    log.info(f"Uloženo {count} akcí do Supabase")
-    return count
+    supabase.table("deals").delete().eq("store", store).execute()
+    log.info(f"Smazány staré záznamy {store}")
+    # Vkládáme po dávkách 50 aby nedošlo k timeout
+    total = 0
+    for i in range(0, len(deals), 50):
+        batch = deals[i:i+50]
+        result = supabase.table("deals").insert(batch).execute()
+        total += len(result.data) if result.data else 0
+    log.info(f"Uloženo {total} akcí ({store}) do Supabase")
+    return total
 
 
 # ============================================================
-# SCRAPING
+# HELPERS
 # ============================================================
+
+def now_utc():
+    return datetime.now(timezone.utc).isoformat()
+
 
 def parse_price(text: str) -> Optional[float]:
-    """Parsuje cenu z textu, např. '49,90 Kč' -> 49.90"""
     if not text:
         return None
-    match = re.search(r"(\d+)[,.](\d{2})", text.replace("\xa0", ""))
+    text = text.replace("\xa0", "").replace(" ", "")
+    match = re.search(r"(\d+)[,.](\d{2})", text)
     if match:
         return float(f"{match.group(1)}.{match.group(2)}")
     match = re.search(r"(\d+)", text)
@@ -90,137 +108,270 @@ def parse_price(text: str) -> Optional[float]:
     return None
 
 
-def scrape_rossmann_page(url: str) -> list[dict]:
-    """Scrapuje jednu stránku Rossmann a vrátí seznam produktů."""
+def parse_ean(text: str) -> Optional[str]:
+    """Extrahuje EAN kód (8 nebo 13 číslic)."""
+    if not text:
+        return None
+    match = re.search(r"\b(\d{8}|\d{13})\b", text)
+    return match.group(1) if match else None
+
+
+def parse_date_cz(text: str) -> Optional[str]:
+    """Parsuje česká data jako '1.5.2026', '01.05.2026', 'do 7.5.' → ISO formát."""
+    if not text:
+        return None
+    # dd.mm.yyyy
+    match = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+    if match:
+        try:
+            return f"{match.group(3)}-{int(match.group(2)):02d}-{int(match.group(1)):02d}"
+        except:
+            pass
+    # dd.mm. (bez roku — doplníme aktuální rok)
+    match = re.search(r"(\d{1,2})\.(\d{1,2})\.", text)
+    if match:
+        try:
+            year = datetime.now().year
+            return f"{year}-{int(match.group(2)):02d}-{int(match.group(1)):02d}"
+        except:
+            pass
+    return None
+
+
+def parse_validity(text: str):
+    """Vrátí (valid_from, valid_to) z textu platnosti."""
+    if not text:
+        return None, None
+    dates = re.findall(r"\d{1,2}\.\d{1,2}\.(?:\d{4})?", text)
+    if len(dates) >= 2:
+        return parse_date_cz(dates[0]), parse_date_cz(dates[1])
+    elif len(dates) == 1:
+        return None, parse_date_cz(dates[0])
+    return None, None
+
+
+def deduplicate(deals: list) -> list:
+    seen = set()
+    unique = []
+    for d in deals:
+        key = d["name"].lower()[:50]
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+    return unique
+
+
+def make_deal(name, store, price, old_price=None, ean=None, valid_from=None, valid_to=None):
+    """Vytvoří standardizovaný slovník akce."""
+    if old_price and old_price <= price:
+        old_price = None
+    discount = round(((old_price - price) / old_price) * 100) if old_price else None
+    return {
+        "name": name[:200],
+        "store": store,
+        "price": price,
+        "old_price": old_price,
+        "discount": discount,
+        "ean": ean,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "category": "drogerie",
+        "updated_at": now_utc(),
+    }
+
+
+# ============================================================
+# ROSSMANN SCRAPER
+# ============================================================
+
+def scrape_rossmann_page(url: str) -> list:
     deals = []
-
     try:
-        log.info(f"Scraping: {url}")
-        response = requests.get(url, headers=HEADERS, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Rossmann používá různé CSS třídy — zkusíme více selektorů
-        product_selectors = [
-            "div.product-tile",
-            "div.product-item",
-            "article.product",
-            "div[class*='product']",
-            "li.product",
-        ]
-
-        products = []
-        for selector in product_selectors:
-            products = soup.select(selector)
-            if products:
-                log.info(f"Nalezeno {len(products)} produktů pomocí '{selector}'")
-                break
+        log.info(f"Scraping Rossmann: {url}")
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        products = soup.select("div.product-tile") or soup.select("div.product-item")
 
         if not products:
-            # Fallback — hledáme podle cen
-            log.warning("Produkty nenalezeny přes CSS, zkouším fallback přes ceny")
-            return scrape_rossmann_fallback(soup, url)
+            log.warning(f"Rossmann: žádné produkty na {url}")
+            return deals
+
+        # Platnost akce — hledáme globálně na stránce
+        validity_text = ""
+        for el in soup.select("[class*='valid'], [class*='period'], [class*='platnost'], [class*='date']"):
+            validity_text = el.get_text(strip=True)
+            if re.search(r"\d{1,2}\.\d{1,2}", validity_text):
+                break
+
+        valid_from, valid_to = parse_validity(validity_text)
 
         for product in products:
             try:
-                # Název produktu
-                name_el = (
-                    product.select_one("h2, h3, .product-name, .title, [class*='name']")
-                )
+                name_el = product.select_one("h2, h3, h4, .product-name, [class*='name'], [class*='title']")
                 name = name_el.get_text(strip=True) if name_el else None
                 if not name or len(name) < 2:
                     continue
 
-                # Akční cena
-                price_el = product.select_one(
-                    ".price--sale, .sale-price, .action-price, "
-                    "[class*='sale'], [class*='action'], [class*='akce']"
-                )
-                if not price_el:
-                    price_el = product.select_one("[class*='price']")
+                price_el = product.select_one("[class*='sale'], [class*='offer'], [class*='price'], [class*='Price']")
                 price = parse_price(price_el.get_text(strip=True)) if price_el else None
-
                 if not price:
                     continue
 
-                # Původní cena
-                old_price_el = product.select_one(
-                    ".price--original, .original-price, s, del, "
-                    "[class*='original'], [class*='old'], [class*='before']"
-                )
+                old_price_el = product.select_one("s, del, [class*='original'], [class*='old'], [class*='before']")
                 old_price = parse_price(old_price_el.get_text(strip=True)) if old_price_el else None
 
-                # Sleva
-                discount = None
-                if old_price and old_price > price:
-                    discount = round(((old_price - price) / old_price) * 100)
-                else:
-                    old_price = None
+                # EAN — někdy v data atributech
+                ean = None
+                for attr in ["data-ean", "data-gtin", "data-id", "data-product-id"]:
+                    val = product.get(attr, "")
+                    ean = parse_ean(str(val))
+                    if ean:
+                        break
 
-                deals.append({
-                    "name": name[:200],
-                    "store": "Rossmann",
-                    "price": price,
-                    "old_price": old_price,
-                    "discount": discount,
-                    "category": "drogerie",
-                    "updated_at": datetime.utcnow().isoformat(),
-                })
-
+                deals.append(make_deal(name, "Rossmann", price, old_price, ean, valid_from, valid_to))
             except Exception as e:
-                log.debug(f"Chyba při parsování produktu: {e}")
-                continue
+                log.debug(f"Rossmann produkt chyba: {e}")
 
     except requests.RequestException as e:
-        log.error(f"HTTP chyba pro {url}: {e}")
-
+        log.error(f"HTTP chyba Rossmann {url}: {e}")
     return deals
 
 
-def scrape_rossmann_fallback(soup: BeautifulSoup, url: str) -> list[dict]:
-    """
-    Fallback scraper — hledá ceny v textu stránky.
-    Používá se když CSS selektory nenajdou produkty.
-    """
+# ============================================================
+# DM SCRAPER
+# ============================================================
+
+def scrape_dm_page(url: str) -> list:
     deals = []
-    text = soup.get_text(separator="\n")
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    try:
+        log.info(f"Scraping DM: {url}")
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
 
-    for i, line in enumerate(lines):
-        price_match = re.search(r"(\d+)[,.](\d{2})\s*(Kč|CZK)?", line)
-        if not price_match:
-            continue
+        # Platnost akce
+        validity_text = ""
+        for el in soup.select("[class*='valid'], [class*='period'], [class*='offer-period'], [class*='platnost']"):
+            t = el.get_text(strip=True)
+            if re.search(r"\d{1,2}\.\d{1,2}", t):
+                validity_text = t
+                break
+        valid_from, valid_to = parse_validity(validity_text)
 
-        price = float(f"{price_match.group(1)}.{price_match.group(2)}")
-        if price <= 0 or price > 10000:
-            continue
+        product_selectors = [
+            "div.product-tile", "li.product-grid-item",
+            "div[class*='ProductTile']", "div[data-dmid]",
+        ]
+        products = []
+        for sel in product_selectors:
+            products = soup.select(sel)
+            if products:
+                log.info(f"DM: {len(products)} produktů pomocí '{sel}'")
+                break
 
-        # Hledáme název v okolních řádcích
-        name = None
-        for offset in [-2, -1, 1, 2]:
-            idx = i + offset
-            if 0 <= idx < len(lines):
-                candidate = lines[idx]
-                if (len(candidate) > 4 and
-                        not re.match(r"^\d+[,.]?\d*\s*(Kč|%|ks)?$", candidate) and
-                        "rossmann" not in candidate.lower()):
-                    name = candidate[:200]
-                    break
+        if not products:
+            log.warning(f"DM: žádné produkty na {url}")
+            return deals
 
-        if not name:
-            continue
+        for product in products:
+            try:
+                name_el = product.select_one("h2, h3, h4, [class*='name'], [class*='title'], [class*='Name']")
+                name = name_el.get_text(strip=True) if name_el else None
+                if not name or len(name) < 2:
+                    continue
 
-        deals.append({
-            "name": name,
-            "store": "Rossmann",
-            "price": price,
-            "old_price": None,
-            "discount": None,
-            "category": "drogerie",
-            "updated_at": datetime.utcnow().isoformat(),
-        })
+                price_el = product.select_one("[class*='offer'], [class*='sale'], [class*='price'], [class*='Price']")
+                price = parse_price(price_el.get_text(strip=True)) if price_el else None
+                if not price:
+                    continue
 
-    log.info(f"Fallback nalezl {len(deals)} produktů")
+                old_price_el = product.select_one("s, del, [class*='original'], [class*='old'], [class*='was']")
+                old_price = parse_price(old_price_el.get_text(strip=True)) if old_price_el else None
+
+                # EAN — DM často má v data atributech
+                ean = None
+                for attr in ["data-ean", "data-gtin", "data-articleid", "data-id"]:
+                    val = product.get(attr, "")
+                    ean = parse_ean(str(val))
+                    if ean:
+                        break
+
+                deals.append(make_deal(name, "DM", price, old_price, ean, valid_from, valid_to))
+            except Exception as e:
+                log.debug(f"DM produkt chyba: {e}")
+
+    except requests.RequestException as e:
+        log.error(f"HTTP chyba DM {url}: {e}")
+    return deals
+
+
+# ============================================================
+# TETA SCRAPER
+# ============================================================
+
+def scrape_teta_page(url: str) -> list:
+    deals = []
+    try:
+        log.info(f"Scraping Teta: {url}")
+        r = requests.get(url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Platnost akce
+        validity_text = ""
+        for el in soup.select("[class*='valid'], [class*='period'], [class*='platnost'], [class*='date'], [class*='akce']"):
+            t = el.get_text(strip=True)
+            if re.search(r"\d{1,2}\.\d{1,2}", t):
+                validity_text = t
+                break
+        valid_from, valid_to = parse_validity(validity_text)
+
+        product_selectors = [
+            "div.product-tile", "div.product-item",
+            "li.product", "div[class*='product']",
+            "article[class*='product']",
+        ]
+        products = []
+        for sel in product_selectors:
+            products = soup.select(sel)
+            if products:
+                log.info(f"Teta: {len(products)} produktů pomocí '{sel}'")
+                break
+
+        if not products:
+            log.warning(f"Teta: žádné produkty na {url}")
+            return deals
+
+        for product in products:
+            try:
+                name_el = product.select_one("h2, h3, h4, [class*='name'], [class*='title']")
+                name = name_el.get_text(strip=True) if name_el else None
+                if not name or len(name) < 2:
+                    continue
+
+                price_el = product.select_one("[class*='sale'], [class*='akce'], [class*='action'], [class*='price']")
+                price = parse_price(price_el.get_text(strip=True)) if price_el else None
+                if not price:
+                    continue
+
+                old_price_el = product.select_one("s, del, [class*='original'], [class*='before'], [class*='old']")
+                old_price = parse_price(old_price_el.get_text(strip=True)) if old_price_el else None
+
+                # EAN
+                ean = None
+                for attr in ["data-ean", "data-gtin", "data-id", "data-product-id"]:
+                    val = product.get(attr, "")
+                    ean = parse_ean(str(val))
+                    if ean:
+                        break
+
+                deals.append(make_deal(name, "Teta", price, old_price, ean, valid_from, valid_to))
+            except Exception as e:
+                log.debug(f"Teta produkt chyba: {e}")
+
+    except requests.RequestException as e:
+        log.error(f"HTTP chyba Teta {url}: {e}")
     return deals
 
 
@@ -229,33 +380,47 @@ def scrape_rossmann_fallback(soup: BeautifulSoup, url: str) -> list[dict]:
 # ============================================================
 
 def run():
-    log.info("=== Rossmann scraper START ===")
-    all_deals = []
+    log.info("=== Drogerie scraper START ===")
+    results = {}
 
+    # ROSSMANN
+    log.info("--- Scrapuji Rossmann ---")
+    rossmann_deals = []
     for url in ROSSMANN_URLS:
-        deals = scrape_rossmann_page(url)
-        all_deals.extend(deals)
-        log.info(f"  → {len(deals)} akcí z {url}")
-        time.sleep(2)  # Pauza mezi požadavky
+        rossmann_deals.extend(scrape_rossmann_page(url))
+        time.sleep(2)
+    rossmann_unique = deduplicate(rossmann_deals)
+    results["Rossmann"] = len(rossmann_unique)
+    if rossmann_unique:
+        save_deals(rossmann_unique, "Rossmann")
 
-    # Deduplikace podle názvu
-    seen = set()
-    unique_deals = []
-    for d in all_deals:
-        key = d["name"].lower()[:50]
-        if key not in seen:
-            seen.add(key)
-            unique_deals.append(d)
-
-    log.info(f"Celkem unikátních akcí: {len(unique_deals)}")
-
-    if unique_deals:
-        saved = save_deals(unique_deals)
-        log.info(f"Uloženo: {saved} akcí")
+    # DM
+    log.info("--- Scrapuji DM ---")
+    dm_deals = []
+    for url in DM_URLS:
+        dm_deals.extend(scrape_dm_page(url))
+        time.sleep(2)
+    dm_unique = deduplicate(dm_deals)
+    results["DM"] = len(dm_unique)
+    if dm_unique:
+        save_deals(dm_unique, "DM")
     else:
-        log.warning("Žádné akce nenalezeny!")
+        log.warning("DM: žádné akce nenalezeny!")
 
-    log.info("=== Rossmann scraper END ===")
+    # TETA
+    log.info("--- Scrapuji Teta ---")
+    teta_deals = []
+    for url in TETA_URLS:
+        teta_deals.extend(scrape_teta_page(url))
+        time.sleep(2)
+    teta_unique = deduplicate(teta_deals)
+    results["Teta"] = len(teta_unique)
+    if teta_unique:
+        save_deals(teta_unique, "Teta")
+    else:
+        log.warning("Teta: žádné akce nenalezeny!")
+
+    log.info(f"=== Drogerie scraper END === {results}")
 
 
 if __name__ == "__main__":
