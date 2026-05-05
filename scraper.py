@@ -41,38 +41,13 @@ HEADERS_WEB = {
 # Obchody přes Claude API
 STORES = [
     {
-        "name": "DM",
-        "query": "Jdi na https://www.dm.cz/akce/ a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku (make-up, krémy, séra), péči o tělo (sprchové gely, deodoranty), vlasovou kosmetiku (šampóny, kondicionéry), zubní péči, hygienické potřeby (toaletní papír, ubrousky), epilaci, přípravky pro miminko. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
         "name": "Lidl",
         "query": "Jdi na https://www.lidl.cz/aktualni-letak a najdi POUZE drogerii se slevou z aktuálního letáku. Hledej: prací prostředky, čisticí prostředky, kosmetiku, sprchové gely, šampóny, zubní pasty, toaletní papír, plenky, deodoranty. NEZAHRNUJ potraviny, nápoje, oblečení, elektro. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
         "category": "drogerie",
     },
     {
-        "name": "Albert",
-        "query": "Jdi na https://www.albert.cz/letaky a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, hygienu, péči o tělo a vlasy. NEZAHRNUJ potraviny. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
-        "name": "Kaufland",
-        "query": "Jdi na https://www.kaufland.cz/akce a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, hygienu, péči o tělo. NEZAHRNUJ potraviny. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
-        "name": "BILLA",
-        "query": "Jdi na https://www.billa.cz/letaky a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, hygienu. NEZAHRNUJ potraviny. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
-        "name": "Penny",
-        "query": "Jdi na https://www.penny.cz/letak a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, hygienu. NEZAHRNUJ potraviny. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
-        "name": "Tesco",
-        "query": "Jdi na https://www.tesco.com/cs-CZ/zones/letaky a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, hygienu. NEZAHRNUJ potraviny. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
+        "name": "Teta",
+        "query": "Jdi na https://www.tetadrogerie.cz/akce a najdi POUZE akční drogerii se slevou. Hledej: prací prostředky, čisticí prostředky, kosmetiku, péči o tělo, vlasovou kosmetiku, zubní péči, hygienické potřeby. Pro každý produkt uveď přesný název s gramáží, akční cenu a původní cenu.",
         "category": "drogerie",
     },
 ]
@@ -328,7 +303,7 @@ def run():
         results[store] = len(deals)
         if deals:
             save_deals(deals, store, category)
-        time.sleep(90)  # 90s pauza kvůli rate limitu
+        time.sleep(60)  # 60s pauza kvůli rate limitu
 
     log.info(f"=== Drogerie scraper END === {results}")
     log.info(f"Celkem uloženo: {sum(results.values())} akcí ze {len(results)} obchodů")
