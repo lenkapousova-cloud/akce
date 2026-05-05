@@ -31,61 +31,14 @@ HEADERS_ANTHROPIC = {
 
 # Obchody k prohledání
 STORES = [
-    # Drogerie
     {
         "name": "DM",
-        "query": "Najdi aktuální akční ceny drogerie z DM na dm.cz/akce. Hledej produkty se slevou včetně původní a akční ceny.",
+        "query": "Jdi na https://www.dm.cz/akce a najdi všechny aktuální akční produkty s přeškrtnutou cenou. Pro každý produkt uveď název, akční cenu a původní cenu.",
         "category": "drogerie",
     },
-    {
-        "name": "Teta",
-        "query": "Najdi aktuální akční ceny drogerie z Teta drogerie na tetadrogerie.cz. Hledej produkty se slevou.",
-        "category": "drogerie",
-    },
-    {
-        "name": "BENU",
-        "query": "Najdi aktuální akční ceny z lékárny BENU na benu.cz. Hledej produkty se slevou.",
-        "category": "drogerie",
-    },
-    {
-        "name": "Dr.Max",
-        "query": "Najdi aktuální akční ceny z Dr.Max lékárny na drmax.cz. Hledej produkty se slevou.",
-        "category": "drogerie",
-    },
-    # Supermarkety a hypermarkety
     {
         "name": "Lidl",
-        "query": "Najdi aktuální akční ceny z akčního letáku Lidl na lidl.cz nebo kupi.cz. Hledej potraviny, drogerii a ostatní zboží se slevou včetně původní a akční ceny.",
-        "category": "potraviny",
-    },
-    {
-        "name": "Albert",
-        "query": "Najdi aktuální akční ceny z akčního letáku Albert supermarket na albert.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
-        "category": "potraviny",
-    },
-    {
-        "name": "Globus",
-        "query": "Najdi aktuální akční ceny z akčního letáku Globus hypermarket na globus.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
-        "category": "potraviny",
-    },
-    {
-        "name": "BILLA",
-        "query": "Najdi aktuální akční ceny z akčního letáku BILLA supermarket na billa.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
-        "category": "potraviny",
-    },
-    {
-        "name": "Kaufland",
-        "query": "Najdi aktuální akční ceny z akčního letáku Kaufland na kaufland.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
-        "category": "potraviny",
-    },
-    {
-        "name": "Penny",
-        "query": "Najdi aktuální akční ceny z akčního letáku Penny Market na penny.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
-        "category": "potraviny",
-    },
-    {
-        "name": "Tesco",
-        "query": "Najdi aktuální akční ceny z akčního letáku Tesco na tesco.com/cs-CZ nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
+        "query": "Najdi aktuální akční ceny z akčního letáku Lidl na lidl.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
         "category": "potraviny",
     },
 ]
@@ -385,7 +338,7 @@ def run():
         results[store] = len(deals)
         if deals:
             save_deals(deals, store, category)
-        time.sleep(15)  # Pauza mezi API voláními — rate limit
+        time.sleep(60)  # Pauza mezi API voláními — rate limit (1 min)
 
     log.info(f"=== Drogerie scraper END === {results}")
     total = sum(results.values())
