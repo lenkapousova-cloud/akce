@@ -18,6 +18,7 @@ from typing import Optional
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 
@@ -249,6 +250,33 @@ def scrape_rossmann_page(url: str) -> list:
     return deals
 
 
+
+# ============================================================
+# PLAYWRIGHT — pro JavaScript-rendered stránky (DM, Teta)
+# ============================================================
+
+def scrape_with_playwright(url: str, wait_selector: str = None, timeout: int = 15000) -> str:
+    """Načte stránku přes headless Chromium a vrátí HTML."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = browser.new_page(user_agent=HEADERS["User-Agent"])
+            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            if wait_selector:
+                try:
+                    page.wait_for_selector(wait_selector, timeout=8000)
+                except:
+                    pass
+            else:
+                page.wait_for_timeout(3000)
+            html = page.content()
+            browser.close()
+            return html
+    except Exception as e:
+        log.error(f"Playwright chyba pro {url}: {e}")
+        return ""
+
+
 # ============================================================
 # DM SCRAPER
 # ============================================================
@@ -257,9 +285,11 @@ def scrape_dm_page(url: str) -> list:
     deals = []
     try:
         log.info(f"Scraping DM: {url}")
-        r = requests.get(url, headers=HEADERS, timeout=30, verify=False)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
+        html = scrape_with_playwright(url, wait_selector="div.product-tile, li.product-grid-item")
+        if not html:
+            log.warning(f"DM: prázdná odpověď pro {url}")
+            return deals
+        soup = BeautifulSoup(html, "html.parser")
 
         # Platnost akce
         validity_text = ""
@@ -330,9 +360,11 @@ def scrape_teta_page(url: str) -> list:
     deals = []
     try:
         log.info(f"Scraping Teta: {url}")
-        r = requests.get(url, headers=HEADERS, timeout=30, verify=False)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
+        html = scrape_with_playwright(url, wait_selector="div.product-tile, div.product-item, article.product")
+        if not html:
+            log.warning(f"Teta: prázdná odpověď pro {url}")
+            return deals
+        soup = BeautifulSoup(html, "html.parser")
 
         # Platnost akce
         validity_text = ""
