@@ -25,12 +25,14 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")  # service_role key
 
 # URL stránek k scrapování
 ROSSMANN_URLS = [
-    "https://www.rossmann.cz/obsah/akce-a-letaky",
-    "https://www.rossmann.cz/category/tele/kosmetika-a-parfumerie",
-    "https://www.rossmann.cz/category/tele/pece-o-telo",
-    "https://www.rossmann.cz/category/tele/vlasova-kosmetika",
-    "https://www.rossmann.cz/category/tele/prace-a-uklid",
-    "https://www.rossmann.cz/category/tele/pece-o-zdravi",
+    "https://www.rossmann.cz/akce-a-slevy",
+    "https://www.rossmann.cz/dekorativni-kosmetika",
+    "https://www.rossmann.cz/pece-o-plet",
+    "https://www.rossmann.cz/vlasova-kosmetika",
+    "https://www.rossmann.cz/prace-a-uklid",
+    "https://www.rossmann.cz/pece-o-zdravi",
+    "https://www.rossmann.cz/telo-a-koupel",
+    "https://www.rossmann.cz/parfemy",
 ]
 
 HEADERS = {
