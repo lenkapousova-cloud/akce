@@ -163,7 +163,7 @@ def deduplicate(deals: list) -> list:
     return unique
 
 
-def make_deal(name, store, price, old_price=None, ean=None, valid_from=None, valid_to=None):
+def make_deal(name, store, price, old_price=None, ean=None, valid_from=None, valid_to=None, brand=None, source_url=None):
     """Vytvoří standardizovaný slovník akce."""
     if old_price and old_price <= price:
         old_price = None
@@ -175,6 +175,8 @@ def make_deal(name, store, price, old_price=None, ean=None, valid_from=None, val
         "old_price": old_price,
         "discount": discount,
         "ean": ean,
+        "brand": brand,
+        "source_url": source_url,
         "valid_from": valid_from,
         "valid_to": valid_to,
         "category": "drogerie",
@@ -231,7 +233,14 @@ def scrape_rossmann_page(url: str) -> list:
                     if ean:
                         break
 
-                deals.append(make_deal(name, "Rossmann", price, old_price, ean, valid_from, valid_to))
+                # Pokus o extrakci značky (brand) — bývá v názvu nebo v atributu
+                brand_el = product.select_one("[class*='brand'], [class*='manufacturer'], [class*='Brand']")
+                brand = brand_el.get_text(strip=True) if brand_el else None
+                if not brand and name:
+                    # Zkusíme první slovo jako značku (např. "Dove sprchový gel" → "Dove")
+                    brand = name.split()[0] if len(name.split()) > 1 else None
+
+                deals.append(make_deal(name, "Rossmann", price, old_price, ean, valid_from, valid_to, brand=brand, source_url=url))
             except Exception as e:
                 log.debug(f"Rossmann produkt chyba: {e}")
 
@@ -299,7 +308,12 @@ def scrape_dm_page(url: str) -> list:
                     if ean:
                         break
 
-                deals.append(make_deal(name, "DM", price, old_price, ean, valid_from, valid_to))
+                brand_el = product.select_one("[class*='brand'], [class*='Brand'], [class*='manufacturer']")
+                brand = brand_el.get_text(strip=True) if brand_el else None
+                if not brand and name:
+                    brand = name.split()[0] if len(name.split()) > 1 else None
+
+                deals.append(make_deal(name, "DM", price, old_price, ean, valid_from, valid_to, brand=brand, source_url=url))
             except Exception as e:
                 log.debug(f"DM produkt chyba: {e}")
 
@@ -368,7 +382,12 @@ def scrape_teta_page(url: str) -> list:
                     if ean:
                         break
 
-                deals.append(make_deal(name, "Teta", price, old_price, ean, valid_from, valid_to))
+                brand_el = product.select_one("[class*='brand'], [class*='Brand'], [class*='manufacturer']")
+                brand = brand_el.get_text(strip=True) if brand_el else None
+                if not brand and name:
+                    brand = name.split()[0] if len(name.split()) > 1 else None
+
+                deals.append(make_deal(name, "Teta", price, old_price, ean, valid_from, valid_to, brand=brand, source_url=url))
             except Exception as e:
                 log.debug(f"Teta produkt chyba: {e}")
 
