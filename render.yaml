@@ -3,8 +3,8 @@ services:
     name: rossmann-scraper
     runtime: python
     schedule: "0 5 * * 1,4"
-    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/pw-browsers playwright install chromium --with-deps
-    startCommand: PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/pw-browsers python scraper.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scraper.py
     envVars:
       - key: SUPABASE_URL
         value: https://eifooaghbprllczieowj.supabase.co
