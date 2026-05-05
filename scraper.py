@@ -32,13 +32,8 @@ HEADERS_ANTHROPIC = {
 # Obchody k prohledání
 STORES = [
     {
-        "name": "DM",
-        "query": "Jdi na https://www.dm.cz/akce a najdi všechny aktuální akční produkty s přeškrtnutou cenou. Pro každý produkt uveď název, akční cenu a původní cenu.",
-        "category": "drogerie",
-    },
-    {
         "name": "Lidl",
-        "query": "Najdi aktuální akční ceny z akčního letáku Lidl na lidl.cz nebo kupi.cz. Hledej potraviny a zboží se slevou včetně původní a akční ceny.",
+        "query": "Jdi na https://www.lidl.cz/aktualni-letak a najdi produkty z aktuálního týdenního letáku se slevou. Uveď název produktu, akční cenu a původní cenu.",
         "category": "potraviny",
     },
 ]
