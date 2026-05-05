@@ -137,7 +137,7 @@ Pravidla výstupu:
 - Pokud nenajdeš žádné akce dle definice výše, vrať []"""
 
     payload = {
-"model": "claude-sonnet-4-5",
+        "model": "claude-sonnet-4-5",
         "max_tokens": 4096,
         "system": system_prompt,
         "messages": [{
@@ -152,13 +152,21 @@ Pravidla výstupu:
 
     try:
         log.info(f"Volám Claude API pro {store_name}...")
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=HEADERS_ANTHROPIC,
-            json=payload,
-            timeout=60
-        )
-        response.raise_for_status()
+        # Retry při rate limitu
+        for attempt in range(3):
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=HEADERS_ANTHROPIC,
+                json=payload,
+                timeout=60
+            )
+            if response.status_code == 429:
+                wait = 30 * (attempt + 1)
+                log.warning(f"{store_name}: rate limit, čekám {wait}s (pokus {attempt+1}/3)")
+                time.sleep(wait)
+                continue
+            response.raise_for_status()
+            break
         data = response.json()
 
         # Extrahuj text z odpovědi
@@ -377,7 +385,7 @@ def run():
         results[store] = len(deals)
         if deals:
             save_deals(deals, store, category)
-        time.sleep(3)  # Pauza mezi API voláními
+        time.sleep(15)  # Pauza mezi API voláními — rate limit
 
     log.info(f"=== Drogerie scraper END === {results}")
     total = sum(results.values())
