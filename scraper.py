@@ -137,7 +137,7 @@ Pravidla výstupu:
 - Pokud nenajdeš žádné akce dle definice výše, vrať []"""
 
     payload = {
-        "model": "claude-sonnet-4-20250514",
+"model": "claude-sonnet-4-5",
         "max_tokens": 4096,
         "system": system_prompt,
         "messages": [{
