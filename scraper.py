@@ -18,7 +18,6 @@ from typing import Optional
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 
@@ -256,119 +255,12 @@ def scrape_rossmann_page(url: str) -> list:
 
 
 # ============================================================
-# PLAYWRIGHT — pro JavaScript-rendered stránky (DM, Teta)
-# ============================================================
-
-def scrape_with_playwright(url: str, wait_selector: str = None, timeout: int = 15000) -> str:
-    # Nastav cestu k prohlížeči pokud existuje
-    import subprocess
-    pw_path = "/opt/render/project/pw-browsers"
-    if os.path.exists(pw_path):
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = pw_path
-    else:
-        # Nainstaluj chromium za běhu pokud neexistuje
-        try:
-            subprocess.run(
-                ["playwright", "install", "chromium", "--with-deps"],
-                check=True, capture_output=True, timeout=120
-            )
-            log.info("Chromium nainstalován za běhu")
-        except Exception as e:
-            log.warning(f"Playwright install failed: {e}")
-    """Načte stránku přes headless Chromium a vrátí HTML."""
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-            page = browser.new_page(user_agent=HEADERS["User-Agent"])
-            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
-            if wait_selector:
-                try:
-                    page.wait_for_selector(wait_selector, timeout=8000)
-                except:
-                    pass
-            else:
-                page.wait_for_timeout(3000)
-            html = page.content()
-            browser.close()
-            return html
-    except Exception as e:
-        log.error(f"Playwright chyba pro {url}: {e}")
-        return ""
-
-
-# ============================================================
 # DM SCRAPER
 # ============================================================
 
 def scrape_dm_page(url: str) -> list:
-    deals = []
-    try:
-        log.info(f"Scraping DM: {url}")
-        html = scrape_with_playwright(url, wait_selector="div.product-tile, li.product-grid-item")
-        if not html:
-            log.warning(f"DM: prázdná odpověď pro {url}")
-            return deals
-        soup = BeautifulSoup(html, "html.parser")
-
-        # Platnost akce
-        validity_text = ""
-        for el in soup.select("[class*='valid'], [class*='period'], [class*='offer-period'], [class*='platnost']"):
-            t = el.get_text(strip=True)
-            if re.search(r"\d{1,2}\.\d{1,2}", t):
-                validity_text = t
-                break
-        valid_from, valid_to = parse_validity(validity_text)
-
-        product_selectors = [
-            "div.product-tile", "li.product-grid-item",
-            "div[class*='ProductTile']", "div[data-dmid]",
-        ]
-        products = []
-        for sel in product_selectors:
-            products = soup.select(sel)
-            if products:
-                log.info(f"DM: {len(products)} produktů pomocí '{sel}'")
-                break
-
-        if not products:
-            log.warning(f"DM: žádné produkty na {url}")
-            return deals
-
-        for product in products:
-            try:
-                name_el = product.select_one("h2, h3, h4, [class*='name'], [class*='title'], [class*='Name']")
-                name = name_el.get_text(strip=True) if name_el else None
-                if not name or len(name) < 2:
-                    continue
-
-                price_el = product.select_one("[class*='offer'], [class*='sale'], [class*='price'], [class*='Price']")
-                price = parse_price(price_el.get_text(strip=True)) if price_el else None
-                if not price:
-                    continue
-
-                old_price_el = product.select_one("s, del, [class*='original'], [class*='old'], [class*='was']")
-                old_price = parse_price(old_price_el.get_text(strip=True)) if old_price_el else None
-
-                # EAN — DM často má v data atributech
-                ean = None
-                for attr in ["data-ean", "data-gtin", "data-articleid", "data-id"]:
-                    val = product.get(attr, "")
-                    ean = parse_ean(str(val))
-                    if ean:
-                        break
-
-                brand_el = product.select_one("[class*='brand'], [class*='Brand'], [class*='manufacturer']")
-                brand = brand_el.get_text(strip=True) if brand_el else None
-                if not brand and name:
-                    brand = name.split()[0] if len(name.split()) > 1 else None
-
-                deals.append(make_deal(name, "DM", price, old_price, ean, valid_from, valid_to, brand=brand, source_url=url))
-            except Exception as e:
-                log.debug(f"DM produkt chyba: {e}")
-
-    except requests.RequestException as e:
-        log.error(f"HTTP chyba DM {url}: {e}")
-    return deals
+    log.info(f"DM scraping přeskočeno — zajišťuje Lovable/Claude API")
+    return []
 
 
 # ============================================================
@@ -376,75 +268,8 @@ def scrape_dm_page(url: str) -> list:
 # ============================================================
 
 def scrape_teta_page(url: str) -> list:
-    deals = []
-    try:
-        log.info(f"Scraping Teta: {url}")
-        html = scrape_with_playwright(url, wait_selector="div.product-tile, div.product-item, article.product")
-        if not html:
-            log.warning(f"Teta: prázdná odpověď pro {url}")
-            return deals
-        soup = BeautifulSoup(html, "html.parser")
-
-        # Platnost akce
-        validity_text = ""
-        for el in soup.select("[class*='valid'], [class*='period'], [class*='platnost'], [class*='date'], [class*='akce']"):
-            t = el.get_text(strip=True)
-            if re.search(r"\d{1,2}\.\d{1,2}", t):
-                validity_text = t
-                break
-        valid_from, valid_to = parse_validity(validity_text)
-
-        product_selectors = [
-            "div.product-tile", "div.product-item",
-            "li.product", "div[class*='product']",
-            "article[class*='product']",
-        ]
-        products = []
-        for sel in product_selectors:
-            products = soup.select(sel)
-            if products:
-                log.info(f"Teta: {len(products)} produktů pomocí '{sel}'")
-                break
-
-        if not products:
-            log.warning(f"Teta: žádné produkty na {url}")
-            return deals
-
-        for product in products:
-            try:
-                name_el = product.select_one("h2, h3, h4, [class*='name'], [class*='title']")
-                name = name_el.get_text(strip=True) if name_el else None
-                if not name or len(name) < 2:
-                    continue
-
-                price_el = product.select_one("[class*='sale'], [class*='akce'], [class*='action'], [class*='price']")
-                price = parse_price(price_el.get_text(strip=True)) if price_el else None
-                if not price:
-                    continue
-
-                old_price_el = product.select_one("s, del, [class*='original'], [class*='before'], [class*='old']")
-                old_price = parse_price(old_price_el.get_text(strip=True)) if old_price_el else None
-
-                # EAN
-                ean = None
-                for attr in ["data-ean", "data-gtin", "data-id", "data-product-id"]:
-                    val = product.get(attr, "")
-                    ean = parse_ean(str(val))
-                    if ean:
-                        break
-
-                brand_el = product.select_one("[class*='brand'], [class*='Brand'], [class*='manufacturer']")
-                brand = brand_el.get_text(strip=True) if brand_el else None
-                if not brand and name:
-                    brand = name.split()[0] if len(name.split()) > 1 else None
-
-                deals.append(make_deal(name, "Teta", price, old_price, ean, valid_from, valid_to, brand=brand, source_url=url))
-            except Exception as e:
-                log.debug(f"Teta produkt chyba: {e}")
-
-    except requests.RequestException as e:
-        log.error(f"HTTP chyba Teta {url}: {e}")
-    return deals
+    log.info(f"Teta scraping přeskočeno — zajišťuje Lovable/Claude API")
+    return []
 
 
 # ============================================================
