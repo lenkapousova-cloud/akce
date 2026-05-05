@@ -2,11 +2,11 @@ services:
   - type: cron
     name: rossmann-scraper
     runtime: python
-    schedule: "0 5 * * 1,4"   # Každé pondělí a čtvrtek v 7:00 Praha (5:00 UTC)
-    buildCommand: pip install -r requirements.txt
+    schedule: "0 5 * * 1,4"
+    buildCommand: pip install -r requirements.txt && playwright install chromium --with-deps
     startCommand: python scraper.py
     envVars:
       - key: SUPABASE_URL
         value: https://eifooaghbprllczieowj.supabase.co
       - key: SUPABASE_KEY
-        sync: false   # Zadáte ručně v Render dashboardu (service_role key)
+        sync: false
