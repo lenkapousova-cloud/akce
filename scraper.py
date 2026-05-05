@@ -101,27 +101,40 @@ log = logging.getLogger(__name__)
 def ask_claude(store_name: str, query: str, category: str = "potraviny") -> list:
     """Zavolá Claude API s web search a vrátí seznam akcí jako JSON."""
 
-    system_prompt = """Jsi expert na české akční ceny drogerie. 
-Vyhledej aktuální akce a vrať POUZE validní JSON pole, bez jakéhokoli dalšího textu.
+    system_prompt = """Jsi expert na české akční ceny. Vyhledej aktuální akce a vrať POUZE validní JSON pole.
+
+DEFINICE AKCE — produkt musí splňovat ALESPOŇ JEDNO z těchto kritérií:
+1. Má přeškrtnutou původní cenu a nižší akční cenu (klasická sleva)
+2. Je v akčním letáku obchodu (týdenní/měsíční leták)
+3. Je označen jako "Akce", "Sleva", "Výhodná cena", "Týdenní nabídka", "Super cena"
+4. Má časově omezenou cenu (platí jen do určitého data)
+5. Je v sekci "Akce a slevy" na webu obchodu
+6. Má badge/štítek se slevou v % nebo Kč
+
+CO NENÍ AKCE — nezahrnuj:
+- Běžné produkty bez označení slevy
+- Věrnostní ceny bez akční ceny
+- Produkty "nové v nabídce" bez slevy
 
 Formát každého produktu:
 {
-  "name": "název produktu včetně gramáže",
-  "brand": "značka",
+  "name": "název produktu včetně gramáže/množství",
+  "brand": "značka produktu",
   "price": 29.90,
   "old_price": 49.90,
   "discount": 40,
-  "valid_to": "2026-05-15",
+  "valid_from": "2026-05-05",
+  "valid_to": "2026-05-11",
   "source_url": "https://..."
 }
 
-Pravidla:
-- Vrať POUZE JSON pole [...], žádný jiný text
-- Ceny jako čísla s desetinnou tečkou
-- discount jako celé číslo (procenta)
-- Pokud nevíš datum platnosti, dej null
-- Uveď 10-20 produktů
-- Pokud nenajdeš akce, vrať []"""
+Pravidla výstupu:
+- Vrať POUZE JSON pole [...], žádný jiný text, žádné markdown bloky
+- Ceny jako čísla s desetinnou tečkou (ne string)
+- discount jako celé číslo bez % (např. 40, ne "40%")
+- Datumy ve formátu YYYY-MM-DD, pokud nejsou známy dej null
+- Uveď 15-25 produktů
+- Pokud nenajdeš žádné akce dle definice výše, vrať []"""
 
     payload = {
         "model": "claude-sonnet-4-20250514",
