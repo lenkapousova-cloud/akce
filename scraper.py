@@ -49,8 +49,12 @@ ROSSMANN_URLS = [
     "https://www.rossmann.cz/akce-a-slevy",
     "https://www.rossmann.cz/dekorativni-kosmetika",
     "https://www.rossmann.cz/vlasova-kosmetika",
-    "https://www.rossmann.cz/pece-o-plet-a-telo",
-    "https://www.rossmann.cz/prace-a-uklid-v-domacnosti",
+    "https://www.rossmann.cz/pletova-kosmetika",   # opraveno z pece-o-plet-a-telo
+    "https://www.rossmann.cz/pece-o-telo",          # opraveno
+    "https://www.rossmann.cz/pece-o-zuby",
+    "https://www.rossmann.cz/zdravi",
+    "https://www.rossmann.cz/domacnost",            # opraveno z prace-a-uklid-v-domacnosti
+    "https://www.rossmann.cz/pece-o-dite",
 ]
 
 TETA_URLS = [
