@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from bs4 import BeautifulSoup
 from supabase import create_client, Client
 
@@ -34,12 +36,12 @@ HEADERS = {
 }
 
 DM_URLS = [
-    "https://www.dm.cz/akce/",
-    "https://www.dm.cz/kosmetika/",
-    "https://www.dm.cz/pece-o-telo/",
-    "https://www.dm.cz/vlasy/",
-    "https://www.dm.cz/prace-a-uklid/",
-    "https://www.dm.cz/zdravi/",
+    "https://www.dm.cz/on/demandware.store/Sites-dm-CZ-Site/cs_CZ/Search-UpdateGrid?cgid=020000&start=0&sz=72",
+    "https://www.dm.cz/kosmetika/parfemy/",
+    "https://www.dm.cz/telo-a-koupel/telova-kosmetika/",
+    "https://www.dm.cz/vlasova-kosmetika/sampony/",
+    "https://www.dm.cz/dum-a-zahrada/",
+    "https://www.dm.cz/zdravi-a-lekarnicka/",
 ]
 
 ROSSMANN_URLS = [
@@ -51,12 +53,12 @@ ROSSMANN_URLS = [
 ]
 
 TETA_URLS = [
-    "https://www.teta.cz/akce/",
-    "https://www.teta.cz/kosmetika/",
-    "https://www.teta.cz/pece-o-telo/",
-    "https://www.teta.cz/vlasova-kosmetika/",
-    "https://www.teta.cz/cistici-prostredky/",
-    "https://www.teta.cz/pece-o-zdravi/",
+    "https://www.tetadrogerie.cz/akce",
+    "https://www.tetadrogerie.cz/kosmetika",
+    "https://www.tetadrogerie.cz/pece-o-telo",
+    "https://www.tetadrogerie.cz/vlasy",
+    "https://www.tetadrogerie.cz/cistici-prostredky",
+    "https://www.tetadrogerie.cz/pece-o-zdravi",
 ]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -188,7 +190,7 @@ def scrape_rossmann_page(url: str) -> list:
     deals = []
     try:
         log.info(f"Scraping Rossmann: {url}")
-        r = requests.get(url, headers=HEADERS, timeout=30)
+        r = requests.get(url, headers=HEADERS, timeout=30, verify=False)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
         products = soup.select("div.product-tile") or soup.select("div.product-item")
@@ -246,7 +248,7 @@ def scrape_dm_page(url: str) -> list:
     deals = []
     try:
         log.info(f"Scraping DM: {url}")
-        r = requests.get(url, headers=HEADERS, timeout=30)
+        r = requests.get(url, headers=HEADERS, timeout=30, verify=False)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -314,7 +316,7 @@ def scrape_teta_page(url: str) -> list:
     deals = []
     try:
         log.info(f"Scraping Teta: {url}")
-        r = requests.get(url, headers=HEADERS, timeout=30)
+        r = requests.get(url, headers=HEADERS, timeout=30, verify=False)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
