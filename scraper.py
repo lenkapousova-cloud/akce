@@ -32,9 +32,39 @@ HEADERS_ANTHROPIC = {
 # Obchody k prohledání
 STORES = [
     {
+        "name": "DM",
+        "query": "Jdi na https://www.dm.cz/akce/ a najdi POUZE akční drogerii: prací prostředky, kosmetiku, péči o tělo, vlasy, zuby, hygienické potřeby. Uveď název produktu, gramáž, akční cenu a původní cenu.",
+        "category": "drogerie",
+    },
+    {
         "name": "Lidl",
-        "query": "Jdi na https://www.lidl.cz/aktualni-letak a najdi produkty z aktuálního týdenního letáku se slevou. Uveď název produktu, akční cenu a původní cenu.",
-        "category": "potraviny",
+        "query": "Jdi na https://www.lidl.cz/aktualni-letak a najdi POUZE drogerii se slevou: prací prostředky, čisticí prostředky, kosmetiku, sprchové gely, šampóny, zubní pasty, toaletní papír, plenky. Neuveď potraviny ani oblečení.",
+        "category": "drogerie",
+    },
+    {
+        "name": "Albert",
+        "query": "Jdi na https://www.albert.cz/letaky a najdi POUZE akční drogerii se slevou: prací prostředky, čisticí prostředky, kosmetiku, hygienu, péči o tělo a vlasy. Neuveď potraviny.",
+        "category": "drogerie",
+    },
+    {
+        "name": "Kaufland",
+        "query": "Jdi na https://www.kaufland.cz/akce a najdi POUZE akční drogerii se slevou: prací prostředky, čisticí prostředky, kosmetiku, hygienu, péči o tělo. Neuveď potraviny.",
+        "category": "drogerie",
+    },
+    {
+        "name": "BILLA",
+        "query": "Jdi na https://www.billa.cz/letaky a najdi POUZE akční drogerii se slevou: prací prostředky, čisticí prostředky, kosmetiku, hygienu. Neuveď potraviny.",
+        "category": "drogerie",
+    },
+    {
+        "name": "Penny",
+        "query": "Jdi na https://www.penny.cz/letak a najdi POUZE akční drogerii se slevou: prací prostředky, čisticí prostředky, kosmetiku, hygienu. Neuveď potraviny.",
+        "category": "drogerie",
+    },
+    {
+        "name": "Tesco",
+        "query": "Jdi na https://www.tesco.com/cs-CZ/zones/letaky a najdi POUZE akční drogerii se slevou: prací prostředky, čisticí prostředky, kosmetiku, hygienu. Neuveď potraviny.",
+        "category": "drogerie",
     },
 ]
 
@@ -49,7 +79,7 @@ log = logging.getLogger(__name__)
 def ask_claude(store_name: str, query: str, category: str = "potraviny") -> list:
     """Zavolá Claude API s web search a vrátí seznam akcí jako JSON."""
 
-    system_prompt = """Jsi expert na české akční ceny. Vyhledej aktuální akce a vrať POUZE validní JSON pole.
+    system_prompt = """Jsi expert na české akční ceny DROGERIE. Vyhledej aktuální akce a vrať POUZE validní JSON pole.
 
 DEFINICE AKCE — produkt musí splňovat ALESPOŇ JEDNO z těchto kritérií:
 1. Má přeškrtnutou původní cenu a nižší akční cenu (klasická sleva)
@@ -59,10 +89,27 @@ DEFINICE AKCE — produkt musí splňovat ALESPOŇ JEDNO z těchto kritérií:
 5. Je v sekci "Akce a slevy" na webu obchodu
 6. Má badge/štítek se slevou v % nebo Kč
 
+HLEDEJ POUZE TYTO KATEGORIE DROGERIE:
+- Prací prostředky (prací prášky, gely, kapsle, aviváže)
+- Čisticí prostředky (na nádobí, podlahy, koupelnu, WC)
+- Přípravky do myčky
+- Kosmetika (make-up, rtěnky, řasenky, oční stíny, základy)
+- Péče o pleť (krémy, séra, masky, micelární vody)
+- Péče o tělo (sprchové gely, tělová mléka, deodoranty, mýdla)
+- Vlasová kosmetika (šampóny, kondicionéry, masky, laky)
+- Péče o zuby (zubní pasty, kartáčky, ústní vody)
+- Hygienické potřeby (toaletní papír, papírové kapesníky, vlhčené ubrousky)
+- Epilace, depilace a holení (žiletky, krémy, vosk)
+- Pro miminka a maminky (plenky, dětské krémy, šampóny)
+- Zdraví (vitamíny, doplňky stravy, náplasti)
+- Úklidové pomůcky (houby, mopy, rukavice)
+- Vonné produkty (svíčky, osvěžovače vzduchu)
+
 CO NENÍ AKCE — nezahrnuj:
+- Potraviny, nápoje, alkohol
+- Oblečení, textil
+- Elektronika, hračky
 - Běžné produkty bez označení slevy
-- Věrnostní ceny bez akční ceny
-- Produkty "nové v nabídce" bez slevy
 
 Formát každého produktu:
 {
@@ -333,7 +380,7 @@ def run():
         results[store] = len(deals)
         if deals:
             save_deals(deals, store, category)
-        time.sleep(60)  # Pauza mezi API voláními — rate limit (1 min)
+        time.sleep(90)  # Pauza mezi API voláními — rate limit
 
     log.info(f"=== Drogerie scraper END === {results}")
     total = sum(results.values())
