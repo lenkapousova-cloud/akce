@@ -55,6 +55,7 @@ Pravidla:
     data = r.json()
     text = "\n".join(b["text"] for b in data.get("content", []) if b.get("type") == "text").strip()
     log.info(f"Odpověď délka: {len(text)} znaků")
+    log.info(f"Odpověď obsah: {text[:500]}")
 
     start, end = text.find("["), text.rfind("]") + 1
     if start == -1:
